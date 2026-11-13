@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FocusClock Prototype</title>
+<style>
+:root{--bg:#0B1220;--panel:#111B2E;--text:#E6EDF7;--muted:#9FB0C9;--accent:#7DD3FC;--btn:#38BDF8;--amber:#FBBF24;--red:#F87171;--line:#2B3D61;--op:1;--sc:1}
+body.green{--accent:#86EFAC;--btn:#4ADE80}
+body.hc{--bg:#000;--panel:#000;--text:#fff;--muted:#fff;--accent:#FFFF00;--btn:#FFFF00;--line:#fff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:16px/1.5 system-ui,"Segoe UI",sans-serif}
+[hidden]{display:none!important}
+:focus-visible{outline:3px solid #fff;outline-offset:3px}
+header{display:flex;flex-wrap:wrap;gap:.75rem;align-items:center;justify-content:space-between;padding:.75rem 1.25rem;border-bottom:1px solid var(--line)}
+h1{font-size:1.3rem;margin:0}h2{font-size:1.15rem;margin:0 0 .5rem}
+nav{display:flex;gap:.5rem;flex-wrap:wrap}
+button{font:inherit;font-weight:600;background:var(--btn);color:#0B1220;border:2px solid transparent;border-radius:8px;padding:.55rem 1rem;cursor:pointer;transition:transform .15s,filter .15s}
+button:hover{filter:brightness(1.12)}button:active{transform:scale(.96)}
+button.ghost{background:transparent;color:var(--text);border-color:var(--line)}
+button.ghost[aria-current=page]{border-color:var(--accent);color:var(--accent)}
+button.danger{background:transparent;color:var(--red);border-color:var(--red)}
+main{max-width:780px;margin:0 auto;padding:1.25rem}
+.view{animation:f .2s}@keyframes f{from{opacity:0}to{opacity:1}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:1.25rem;margin-bottom:1rem}
+#timerCard{text-align:center;position:relative;opacity:var(--op);touch-action:none;cursor:grab}
+#time{font:700 calc(4.5rem*var(--sc))/1.1 ui-monospace,Consolas,monospace;color:var(--accent)}
+.due #time,.due #status{color:var(--amber)}
+.dot{display:inline-block;width:.7rem;height:.7rem;border-radius:50%;background:var(--accent);margin-right:.4rem}
+.dot.off{background:var(--muted)}
+.row{display:flex;gap:.6rem;flex-wrap:wrap;justify-content:center;margin:.6rem 0}
+label{display:block;margin:.8rem 0 .2rem;font-weight:600}
+label.inline{display:flex;gap:.5rem;align-items:center;font-weight:400}
+input[type=range]{width:100%}
+input[type=number],select{font:inherit;padding:.4rem;background:var(--bg);color:var(--text);border:2px solid var(--line);border-radius:6px}
+.muted{color:var(--muted)}.err{color:var(--red)}.tick{color:var(--accent);font-weight:700}
+table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:.4rem;border-bottom:1px solid var(--line)}
+dialog{background:var(--panel);color:var(--text);border:2px solid var(--accent);border-radius:14px;max-width:34rem;padding:1.5rem}
+dialog::backdrop{background:rgba(0,0,0,.75)}
+#prev{opacity:var(--op);font:700 calc(2rem*var(--sc))/1.2 ui-monospace,Consolas,monospace;color:var(--accent);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:.5rem 1rem;display:inline-block}
+.chartwrap{overflow-x:auto}svg text{fill:var(--text);font:12px system-ui}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<header>
+  <h1>FocusClock</h1>
+  <span id="cam"><span class="dot off"></span><span id="camTxt">Camera: off</span></span>
+  <nav aria-label="Main">
+    <button class="ghost" data-v="timer" aria-current="page">Timer</button>
+    <button class="ghost" data-v="summary">Summary</button>
+    <button class="ghost" data-v="settings">Settings</button>
+    <button class="ghost" data-v="group">Study group</button>
+  </nav>
+</header>
+<main>
+<p id="flash" class="tick" role="status" aria-live="polite"></p>
+
+<section id="timer" class="view">
+  <div class="card" id="timerCard" tabindex="0" role="group" aria-label="Timer overlay. Use the arrow keys to move it.">
+    <p id="status" role="status" aria-live="polite"></p>
+    <div id="time" role="timer" aria-label="Timer">00:00</div>
+    <p class="muted" id="next"></p>
+    <div class="row">
+      <button id="bStart">Start</button>
+      <button id="bPause" class="ghost">Pause</button>
+      <button id="bReset" class="ghost">Reset</button>
+    </div>
+    <p id="resetBar" hidden>Reset the timer? <button id="rYes" class="danger">Yes, reset</button> <button id="rNo" class="ghost">Cancel</button></p>
+    <p id="undoBar" hidden>Timer reset. <button id="rUndo" class="ghost">Undo</button></p>
+    <p class="muted">Shortcuts: Space to start or pause, R to reset.</p>
+  </div>
+
+  <div class="card" id="reminder" role="alertdialog" aria-labelledby="remT" hidden>
+    <h2 id="remT">Time to rest your eyes?</h2>
+    <p>You’ve focused for <span id="remMin"></span> minutes. Look at something about 6 metres away for 20 seconds.</p>
+    <div class="row"><button id="bBreak">Take a break</button><button id="bSnooze" class="ghost">Snooze 5 min</button><button id="bSkip" class="ghost">Skip</button></div>
+  </div>
+
+  <div class="card">
+    <h2>Demo controls</h2>
+    <p class="muted">For evaluation without a webcam. Camera detection is simulated here.</p>
+    <label class="inline"><input type="checkbox" id="away"> Simulate looking away</label>
+    <div class="row" style="justify-content:flex-start"><button id="bFF" class="ghost">Fast-forward 5 min</button></div>
+  </div>
+</section>
+
+<section id="summary" class="view" hidden>
+  <div class="card">
+    <h2>Your summary</h2>
+    <div class="row" style="justify-content:flex-start" role="group" aria-label="Time range">
+      <button class="ghost" id="vDay" aria-pressed="false">Day</button>
+      <button class="ghost" id="vWeek" aria-pressed="true">Week</button>
+    </div>
+    <p id="sumMsg" role="status" aria-live="polite"></p>
+    <div style="display:flex;gap:1.2rem;align-items:center;flex-wrap:wrap">
+      <svg id="ring" width="120" height="120" viewBox="0 0 120 120" role="img"></svg>
+      <div class="chartwrap"><svg id="chart" width="560" height="230" viewBox="0 0 560 230"></svg></div>
+    </div>
+    <p class="muted">Bars show minutes: active time (left) and rest time (right). Hover or focus a day for details.</p>
+    <details><summary>View as a table</summary><table id="tbl"></table></details>
+  </div>
+</section>
+
+<section id="settings" class="view" hidden>
+  <div class="card">
+    <h2>Appearance</h2>
+    <div id="prev" aria-hidden="true">12:34</div>
+    <label for="op">Overlay opacity: <span id="opv"></span>%</label>
+    <input type="range" id="op" min="30" max="100">
+    <label for="sc">Overlay size: <span id="scv"></span>%</label>
+    <input type="range" id="sc" min="80" max="140">
+    <label for="theme">Colour theme</label>
+    <select id="theme"><option value="">Calm blue</option><option value="green">Soft green</option><option value="hc">High contrast</option></select>
+    <div class="row" style="justify-content:flex-start"><button class="ghost" id="posReset">Reset overlay position</button></div>
+  </div>
+  <div class="card">
+    <h2>Reminders and tracking</h2>
+    <label for="int">Reminder interval (minutes)</label>
+    <input type="number" id="int" min="10" max="60" aria-describedby="intHint intErr">
+    <p id="intHint" class="muted">Between 10 and 60. The 20-20-20 rule suggests 20.</p>
+    <p id="intErr" class="err" role="alert"></p>
+    <label class="inline"><input type="checkbox" id="snd"> Play a soft sound with reminders</label>
+    <fieldset style="border:1px solid var(--line);border-radius:8px;margin-top:.8rem"><legend>Tracking mode</legend>
+      <label class="inline"><input type="radio" name="mode" value="camera"> Camera mode (simulated in this prototype)</label>
+      <label class="inline"><input type="radio" name="mode" value="manual"> Manual mode (no camera)</label>
+    </fieldset>
+    <div class="row" style="justify-content:flex-start"><button id="save">Save settings</button></div>
+    <p id="saved" class="tick" role="status" aria-live="polite"></p>
+  </div>
+  <div class="card">
+    <h2>Privacy</h2>
+    <p class="muted">Video is never stored or uploaded. Only your own saved settings are kept on this device.</p>
+    <button class="danger" id="del">Delete my data</button>
+    <p id="delBar" hidden>Delete all saved data? <button class="danger" id="dYes">Yes, delete</button> <button class="ghost" id="dNo">Cancel</button></p>
+  </div>
+</section>
+
+<section id="group" class="view" hidden>
+  <div class="card">
+    <h2>Study group</h2>
+    <p class="muted">Sharing is off by default. Only totals are shared, never camera data or video.</p>
+    <label class="inline"><input type="checkbox" id="gOn"> Join the group “Exam Squad” (code EXAM-42)</label>
+  </div>
+  <div id="gBody" hidden>
+    <div class="card"><h2>Shared break</h2><p><strong>Group break at 15:30.</strong> Rest your eyes together.</p></div>
+    <div class="card">
+      <h2>Rest-streak leaderboard</h2>
+      <p class="muted">Ranks days in a row that members met their break goal, not hours on screen.</p>
+      <table><thead><tr><th>Member</th><th>Streak (days)</th><th>Encourage</th></tr></thead><tbody id="lb"></tbody></table>
+      <label class="inline"><input type="checkbox" id="hide"> Hide me from the leaderboard</label>
+      <p id="nice" class="tick" role="status" aria-live="polite"></p>
+    </div>
+    <div class="card">
+      <h2>What others can see</h2>
+      <ul><li>Your nickname</li><li>Your break streak and daily totals</li></ul>
+      <p class="muted">They cannot see your camera, eye data or what you are working on.</p>
+      <div class="row" style="justify-content:flex-start"><button class="ghost" id="share">Share my summary</button><button class="danger" id="leave">Leave group</button></div>
+      <label for="shareOut">Summary to send</label>
+      <textarea id="shareOut" rows="2" readonly style="width:100%;background:var(--bg);color:var(--text);border:2px solid var(--line);border-radius:6px;padding:.4rem"></textarea>
+    </div>
+  </div>
+</section>
+</main>
+
+<dialog id="consent" aria-labelledby="cT">
+  <h2 id="cT">Welcome to FocusClock</h2>
+  <p class="muted" id="stepLbl">Step 1 of 3</p>
+  <div id="s1">
+    <p>FocusClock can use your camera to notice when your eyes are on the screen, so it only counts real screen time.</p>
+    <ul><li>Video is processed on your device and is <strong>never stored or uploaded</strong>.</li><li>You can stop at any time, or delete your data.</li><li>Prefer no camera? Manual mode works with Start and Pause.</li></ul>
+    <p class="muted">In this prototype, camera detection is simulated.</p>
+    <div class="row"><button id="useCam">Use camera mode</button><button id="useMan" class="ghost">Use manual mode</button></div>
+  </div>
+  <div id="s2" hidden>
+    <p>Camera check: make sure your face is visible and well lit.</p>
+    <p class="tick">✓ Face found (simulated)</p>
+    <div class="row"><button id="s2n">Continue</button></div>
+  </div>
+  <div id="s3" hidden>
+    <label for="cInt">How often would you like a break reminder?</label>
+    <select id="cInt"><option value="15">Every 15 minutes</option><option value="20" selected>Every 20 minutes (recommended)</option><option value="30">Every 30 minutes</option></select>
+    <div class="row"><button id="fin">Finish setup</button></div>
+  </div>
+</dialog>
+
+<script>
+const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
+let S={mode:null,interval:20,op:100,sc:100,theme:'',sound:false,group:false,hide:false};
+try{Object.assign(S,JSON.parse(localStorage.getItem('fc')||'{}'))}catch(e){}
+const save=()=>{try{localStorage.setItem('fc',JSON.stringify(S))}catch(e){}};
+const REST=20,GOAL=6;
+let paused=true,away=false,phase='focus',focus=0,rest=0,act=0,rst=0,breaks=0,due=false,backup=null,undoT,flashT,range='week';
+const fmt=s=>String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0');
+const flash=m=>{$('#flash').textContent=m;clearTimeout(flashT);flashT=setTimeout(()=>$('#flash').textContent='',4000)};
+
+function look(){
+  document.body.className=S.theme;
+  document.documentElement.style.setProperty('--op',S.op/100);
+  document.documentElement.style.setProperty('--sc',S.sc/100);
+  $('#op').value=S.op;$('#sc').value=S.sc;$('#opv').textContent=S.op;$('#scv').textContent=S.sc;
+  $('#theme').value=S.theme;$('#int').value=S.interval;$('#snd').checked=S.sound;
+  $$('[name=mode]').forEach(r=>r.checked=r.value===S.mode);
+}
+function render(){
+  const cam=S.mode==='camera';
+  $('#camTxt').textContent=cam?'Camera on (simulated)':'Manual mode';
+  $('#cam .dot').classList.toggle('off',!cam);
+  let st;
+  if(phase==='rest')st='Resting: look away from the screen';
+  else if(due)st='Break due: rest your eyes for 20 seconds';
+  else if(paused)st='Paused. Press Start when you’re ready.';
+  else if(cam&&away)st='Paused: looking away';
+  else st=cam?'Eyes detected: timer running':'Timer running';
+  if($('#status').textContent!==st)$('#status').textContent=st;
+  $('#time').textContent=fmt(phase==='rest'?rest:focus);
+  $('#next').textContent=phase==='rest'?'Rest time left':'Next break in '+fmt(Math.max(0,S.interval*60-focus));
+  $('#timerCard').classList.toggle('due',due&&phase==='focus');
+}
+function beep(){if(!S.sound)return;try{const c=new AudioContext(),o=c.createOscillator(),g=c.createGain();o.frequency.value=660;g.gain.value=.05;o.connect(g);g.connect(c.destination);o.start();o.stop(c.currentTime+.25)}catch(e){}}
+function showRem(){due=true;$('#remMin').textContent=S.interval;$('#reminder').hidden=false;beep();if(!$('#timer').hidden)$('#bBreak').focus()}
+const hideRem=()=>{$('#reminder').hidden=true;due=false};
+setInterval(()=>{
+  if(!paused){
+    if(phase==='rest'){rest--;rst++;if(rest<=0){phase='focus';focus=0;breaks++;flash('✓ Break complete. Nice work!')}}
+    else if(!(S.mode==='camera'&&away)){focus++;act++;if(focus>=S.interval*60&&!due)showRem()}
+  }
+  render();if(!$('#summary').hidden)drawSum();
+},1000);
+
+$('#bStart').onclick=()=>{paused=false;render()};
+$('#bPause').onclick=()=>{paused=true;render()};
+$('#bReset').onclick=()=>{$('#resetBar').hidden=false;$('#rYes').focus()};
+$('#rNo').onclick=()=>{$('#resetBar').hidden=true;$('#bReset').focus()};
+$('#rYes').onclick=()=>{
+  backup={focus,rest,phase};focus=0;rest=0;phase='focus';hideRem();
+  $('#resetBar').hidden=true;$('#undoBar').hidden=false;$('#rUndo').focus();
+  clearTimeout(undoT);undoT=setTimeout(()=>$('#undoBar').hidden=true,10000);render();
+};
+$('#rUndo').onclick=()=>{if(backup){({focus,rest,phase}=backup)}$('#undoBar').hidden=true;flash('Reset undone.');render()};
+$('#bBreak').onclick=()=>{hideRem();phase='rest';rest=REST;paused=false;$('#bPause').focus();render()};
+$('#bSnooze').onclick=()=>{hideRem();focus=S.interval*60-300;flash('Snoozed for 5 minutes.');render()};
+$('#bSkip').onclick=()=>{hideRem();focus=0;render()};
+$('#away').onchange=e=>{away=e.target.checked;render()};
+$('#bFF').onclick=()=>{if(phase==='focus'){focus+=300;act+=300;if(focus>=S.interval*60&&!due)showRem()}render()};
+document.addEventListener('keydown',e=>{
+  if(/^(BUTTON|INPUT|SELECT|TEXTAREA|SUMMARY)$/.test(e.target.tagName)||$('#consent').open)return;
+  if(e.key===' '){e.preventDefault();paused=!paused;render()}
+  if(e.key==='r'||e.key==='R'){$('#bReset').click()}
+});
+
+/* draggable overlay with keyboard alternative */
+let ox=0,oy=0;const tc=$('#timerCard'),mv=()=>{tc.style.left=ox+'px';tc.style.top=oy+'px'};
+tc.onpointerdown=e=>{if(e.target.closest('button'))return;tc.setPointerCapture(e.pointerId);tc._d=[e.clientX-ox,e.clientY-oy]};
+tc.onpointermove=e=>{if(tc._d){ox=e.clientX-tc._d[0];oy=e.clientY-tc._d[1];mv()}};
+tc.onpointerup=()=>tc._d=null;
+tc.onkeydown=e=>{const k={ArrowLeft:[-20,0],ArrowRight:[20,0],ArrowUp:[0,-20],ArrowDown:[0,20]}[e.key];if(k&&e.target===tc){e.preventDefault();ox+=k[0];oy+=k[1];mv()}};
+$('#posReset').onclick=()=>{ox=oy=0;mv();flash('Overlay position reset.')};
+
+/* navigation */
+function show(v){
+  $$('section.view').forEach(s=>s.hidden=s.id!==v);
+  $$('nav button').forEach(b=>{if(b.dataset.v===v)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current')});
+  if(v==='summary')drawSum();
+}
+$$('nav button').forEach(b=>b.onclick=()=>show(b.dataset.v));
+
+/* summary */
+const WK=[['Mon',190,30,6],['Tue',240,35,7],['Wed',150,25,5],['Thu',210,32,6],['Fri',180,28,6],['Sat',60,10,2],['Sun',90,15,3]];
+function drawSum(){
+  const wk=range==='week';
+  const d=wk?WK:[['Today',Math.round(act/60),Math.round(rst/60),breaks]];
+  const b=d.reduce((a,x)=>a+x[3],0),p=wk?42:GOAL,max=Math.max(60,...d.map(x=>Math.max(x[1],x[2])));
+  $('#vDay').setAttribute('aria-pressed',!wk);$('#vWeek').setAttribute('aria-pressed',wk);
+  const msg=`You took ${b} of ${p} planned breaks ${wk?'this week':'today'}.`;
+  if($('#sumMsg').textContent!==msg)$('#sumMsg').textContent=msg;
+  const C=2*Math.PI*45,f=Math.min(1,b/p);
+  $('#ring').setAttribute('aria-label',`Break goal: ${b} of ${p}`);
+  $('#ring').innerHTML=`<circle cx="60" cy="60" r="45" fill="none" stroke="var(--line)" stroke-width="10"/><circle cx="60" cy="60" r="45" fill="none" stroke="var(--accent)" stroke-width="10" stroke-linecap="round" stroke-dasharray="${f*C} ${C}" transform="rotate(-90 60 60)"/><text x="60" y="66" text-anchor="middle" style="font-size:18px;font-weight:700">${b}/${p}</text>`;
+  const w=560/d.length,H=170;let s='';
+  d.forEach((x,i)=>{
+    const ha=x[1]/max*H,hr=x[2]/max*H,bx=i*w+w/2-30;
+    s+=`<g tabindex="0" role="img" aria-label="${x[0]}: ${x[1]} minutes active, ${x[2]} minutes rest, ${x[3]} breaks"><title>${x[0]}: ${x[1]} min active, ${x[2]} min rest, ${x[3]} breaks</title>
+    <rect x="${bx}" y="${200-ha}" width="28" height="${ha}" fill="var(--accent)"/><rect x="${bx+32}" y="${200-hr}" width="28" height="${hr}" fill="var(--amber)"/>
+    <text x="${bx+14}" y="${194-ha}" text-anchor="middle">${x[1]}</text><text x="${bx+46}" y="${194-hr}" text-anchor="middle">${x[2]}</text>
+    <text x="${bx+30}" y="220" text-anchor="middle">${x[0]}</text></g>`;
+  });
+  $('#chart').innerHTML=s;
+  $('#tbl').innerHTML='<tr><th>Day</th><th>Active (min)</th><th>Rest (min)</th><th>Breaks</th></tr>'+d.map(x=>`<tr><td>${x[0]}</td><td>${x[1]}</td><td>${x[2]}</td><td>${x[3]}</td></tr>`).join('');
+}
+$('#vDay').onclick=()=>{range='day';drawSum()};$('#vWeek').onclick=()=>{range='week';drawSum()};
+
+/* settings */
+$('#op').oninput=e=>{S.op=+e.target.value;look()};
+$('#sc').oninput=e=>{S.sc=+e.target.value;look()};
+$('#theme').onchange=e=>{S.theme=e.target.value;look()};
+$('#save').onclick=()=>{
+  const v=+$('#int').value;
+  if(!Number.isInteger(v)||v<10||v>60){$('#intErr').textContent='Please enter a whole number between 10 and 60.';$('#int').focus();return}
+  $('#intErr').textContent='';S.interval=v;S.sound=$('#snd').checked;
+  const m=$$('[name=mode]').find(r=>r.checked);if(m&&m.value!==S.mode){S.mode=m.value;paused=S.mode!=='camera'}
+  save();$('#saved').textContent='Settings saved.';setTimeout(()=>$('#saved').textContent='',3000);render();
+};
+$('#del').onclick=()=>{$('#delBar').hidden=false;$('#dNo').focus()};
+$('#dNo').onclick=()=>{$('#delBar').hidden=true;$('#del').focus()};
+$('#dYes').onclick=()=>{
+  try{localStorage.removeItem('fc')}catch(e){}
+  S={mode:null,interval:20,op:100,sc:100,theme:'',sound:false,group:false,hide:false};
+  focus=rest=act=rst=breaks=0;phase='focus';paused=true;hideRem();$('#delBar').hidden=true;
+  look();grp();render();flash('All saved data deleted.');openWelcome();
+};
+
+/* study group */
+const MEM=[['Ayanda',9],['Lerato',6],['Kabelo',4]];let sent={};
+function grp(){
+  $('#gOn').checked=S.group;$('#hide').checked=S.hide;$('#gBody').hidden=!S.group;
+  const rows=MEM.map(m=>({n:m[0],s:m[1]}));if(!S.hide)rows.push({n:'You (StudyFox)',s:3,me:1});
+  rows.sort((a,b)=>b.s-a.s);
+  $('#lb').innerHTML=rows.map(r=>`<tr><td>${r.n}</td><td>${r.s}</td><td>${r.me?'':`<button class="ghost" data-n="${r.n}" aria-label="Send Nice break to ${r.n}">Nice break!${sent[r.n]?' ('+sent[r.n]+')':''}</button>`}</td></tr>`).join('');
+  $$('#lb button').forEach(b=>b.onclick=()=>{sent[b.dataset.n]=(sent[b.dataset.n]||0)+1;$('#nice').textContent='Encouragement sent to '+b.dataset.n+'.';grp()});
+}
+$('#gOn').onchange=e=>{S.group=e.target.checked;save();grp()};
+$('#hide').onchange=e=>{S.hide=e.target.checked;save();grp()};
+$('#leave').onclick=()=>{S.group=false;save();grp();flash('You left the group.')};
+$('#share').onclick=()=>{
+  const t=`FocusClock: ${Math.round(act/60)} min focused, ${Math.round(rst/60)} min rest, ${breaks} breaks today.`;
+  $('#shareOut').value=t;try{navigator.clipboard.writeText(t);flash('Summary copied.')}catch(e){flash('Summary ready to copy.')}
+};
+
+/* welcome dialog (3 steps) */
+const dlg=$('#consent');
+function step(n){[1,2,3].forEach(i=>$('#s'+i).hidden=i!==n);$('#stepLbl').textContent='Step '+n+' of 3'}
+function openWelcome(){step(1);if(!dlg.open)dlg.showModal()}
+dlg.addEventListener('cancel',e=>{if(!S.mode)e.preventDefault()});
+$('#useCam').onclick=()=>{S.mode='camera';step(2);$('#s2n').focus()};
+$('#useMan').onclick=()=>{S.mode='manual';step(3);$('#cInt').focus()};
+$('#s2n').onclick=()=>{step(3);$('#cInt').focus()};
+$('#fin').onclick=()=>{S.interval=+$('#cInt').value;paused=S.mode!=='camera';save();look();dlg.close();render();flash('You’re all set.')};
+
+look();grp();render();
+if(S.mode){paused=S.mode!=='camera'}else openWelcome();
+</script>
+</body>
+</html>
